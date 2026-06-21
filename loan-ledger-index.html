@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Loan Ledger</title>
+<meta name="theme-color" content="#0c0a09" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- Firebase (compat build — works with plain <script> tags, no build step) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<style>
+  :root{
+    --bg:#0c0a09; --surface:#1c1917; --line:#292524;
+    --text:#f5f5f4; --muted:#a8a29e; --muted2:#78716c;
+    --accent:#fbbf24; --danger:#f87171;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; padding-bottom:7rem;}
+  .display{font-family:'Fraunces',Georgia,serif;}
+  .mono{font-family:'IBM Plex Mono','Courier New',monospace; font-variant-numeric:tabular-nums;}
+  .muted{color:var(--muted);}
+  .muted2{color:var(--muted2);}
+  .accent{color:var(--accent);}
+  .danger{color:var(--danger);}
+
+  /* boot / loading */
+  #bootLoading{min-height:100vh; display:flex; align-items:center; justify-content:center; gap:.75rem; font-size:.875rem; color:var(--muted);}
+  .boot-dot{width:8px; height:8px; border-radius:50%; background:var(--accent); animation:pulse 1.4s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:.3;}}
+
+  /* auth screen */
+  .auth-screen{min-height:100vh; display:none; align-items:center; justify-content:center; padding:1.5rem;}
+  .auth-card{width:100%; max-width:360px;}
+  .auth-card h1{font-size:1.6rem; font-weight:500; margin:.5rem 0 .25rem;}
+  .auth-sub{font-size:.8rem; color:var(--muted2); margin:0 0 1.5rem;}
+  .auth-error{font-size:.75rem; color:var(--danger); margin-bottom:.75rem; min-height:1em;}
+  .auth-toggle{font-size:.8rem; color:var(--muted2); margin:1rem 0 0; text-align:center;}
+  .auth-toggle button{background:none; border:none; color:var(--accent); font-family:inherit; font-size:.8rem; cursor:pointer; padding:0; margin-left:.25rem;}
+  .auth-forgot{display:block; width:100%; background:none; border:none; color:var(--muted2); font-family:inherit; font-size:.75rem; cursor:pointer; text-align:center; margin-top:.75rem; padding:0; text-decoration:underline;}
+
+  header{padding:2rem 1.25rem 1.25rem; border-bottom:1px solid var(--line);}
+  .eyebrow{display:flex; align-items:center; gap:.4rem; font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);}
+  .top-row{display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem;}
+  .account-row{display:flex; justify-content:space-between; align-items:center; font-size:.7rem; color:var(--muted2); margin-bottom:.6rem;}
+  select#currency{background:var(--bg); color:var(--muted); font-size:.75rem; border:1px solid var(--line); border-radius:6px; padding:.25rem .5rem;}
+  h1{font-size:1.4rem; font-weight:500; margin:.4rem 0 1rem;}
+  .owed-row{display:flex; align-items:flex-end; gap:.25rem;}
+  .owed-sym{font-size:.85rem; color:var(--muted); margin-bottom:.15rem;}
+  .owed-num{font-size:2.3rem; font-weight:500; line-height:1;}
+  .owed-sub{font-size:.75rem; color:var(--muted2); margin:.4rem 0 0;}
+  .stats{display:flex; margin-top:1.2rem; border-top:1px solid var(--line);}
+  .stat{flex:1; padding-top:.75rem;}
+  .stat + .stat{padding-left:.75rem; border-left:1px solid var(--line);}
+  .stat-label{font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted2); margin-bottom:.2rem;}
+  .stat-val{font-size:.9rem;}
+  .limit-panel{margin-top:1.2rem; padding-top:1rem; border-top:1px solid var(--line);}
+  .limit-bar-track{width:100%; height:6px; border-radius:99px; background:var(--line); overflow:hidden; margin-bottom:.55rem;}
+  .limit-bar-fill{height:100%; background:var(--accent); border-radius:99px; transition:width .3s ease, background .3s ease;}
+  .limit-bar-fill.over{background:var(--danger);}
+  .limit-row{display:flex; justify-content:space-between; align-items:center; font-size:.75rem;}
+  .edit-limit-btn{background:none; border:none; color:var(--muted2); font-size:.75rem; cursor:pointer; font-family:inherit; padding:0; display:flex; align-items:center; gap:.3rem;}
+  .edit-limit-btn:hover{color:var(--text);}
+  #availableVal.over{color:var(--danger); font-weight:600;}
+  .tabs{display:flex; border-bottom:1px solid var(--line); padding:0 1.25rem; position:sticky; top:0; background:var(--bg); z-index:5;}
+  .tab{background:none; border:none; color:var(--muted2); font-size:.875rem; padding:.75rem .1rem; margin-right:1.5rem; border-bottom:2px solid transparent; cursor:pointer; font-family:inherit;}
+  .tab.active{color:var(--text); border-color:var(--accent);}
+  .card{border-bottom:1px solid var(--line); padding:1rem 1.25rem;}
+  .card.repaid{opacity:.6;}
+  .card-top{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:.65rem;}
+  .card-title{font-size:.9rem; font-weight:500;}
+  .card-meta{font-size:.75rem; color:var(--muted2); margin-top:.15rem; display:flex; align-items:center; gap:.3rem;}
+  .dot{width:6px; height:6px; border-radius:50%; background:var(--accent); animation:pulse 1.8s ease-in-out infinite;}
+  .days-badge{font-size:.75rem; color:var(--muted); display:flex; align-items:center; gap:.3rem;}
+  .figures{display:flex; justify-content:space-between; gap:.5rem;}
+  .fig{flex:1;}
+  .fig.right{text-align:right;}
+  .fig-label{font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted2); margin-bottom:.15rem;}
+  .fig-val{font-size:1rem;}
+  .fig-val.strong{font-weight:600;}
+  .actions{display:flex; gap:.5rem; margin-top:.85rem;}
+  .btn{flex:1; display:flex; align-items:center; justify-content:center; gap:.35rem; font-size:.75rem; padding:.55rem; border-radius:8px; border:1px solid var(--line); background:none; color:var(--muted); cursor:pointer; font-family:inherit;}
+  .btn:hover{color:var(--text); border-color:var(--accent);}
+  .btn.icon-only{flex:none; padding:.55rem .75rem;}
+  .btn.icon-only:hover{color:var(--danger); border-color:var(--danger);}
+  .empty{padding:3rem 1.25rem; text-align:center; font-size:.875rem; color:var(--muted2);}
+  .fab{position:fixed; bottom:1.5rem; right:1.25rem; width:56px; height:56px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; font-size:1.6rem; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.4);}
+  .fab:active{transform:scale(.95);}
+  .overlay{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:40; display:none;}
+  .overlay.open{display:block;}
+  .sheet{position:fixed; left:0; right:0; bottom:0; background:var(--surface); border-top:1px solid var(--line); border-radius:18px 18px 0 0; padding:1.25rem 1.25rem 2rem; max-height:85vh; overflow-y:auto; z-index:50; transform:translateY(100%); transition:transform .25s ease; }
+  .sheet.open{transform:translateY(0);}
+  .sheet-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;}
+  .sheet-head h2{font-size:1.1rem; margin:0; font-weight:500;}
+  .close-btn{background:none; border:none; color:var(--muted); font-size:1.3rem; cursor:pointer; line-height:1;}
+  label{display:block; font-size:.75rem; color:var(--muted2); margin-bottom:.3rem;}
+  input[type=number], input[type=date], input[type=text], input[type=email], input[type=password]{
+    width:100%; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:.6rem .7rem;
+    color:var(--text); font-family:inherit; font-size:.9rem; margin-bottom:1rem;
+  }
+  input:focus{outline:none; border-color:var(--accent);}
+  .type-row{display:flex; gap:.5rem; margin-bottom:.4rem;}
+  .type-btn{flex:1; padding:.55rem; border-radius:8px; border:1px solid var(--line); background:none; color:var(--muted); font-size:.85rem; cursor:pointer; font-family:inherit;}
+  .type-btn.selected{border-color:var(--accent); color:var(--accent);}
+  .hint{font-size:.7rem; color:var(--muted2); margin:0 0 1.2rem;}
+  .amount-hint{font-size:.7rem; color:var(--muted2); margin:-.6rem 0 1.2rem;}
+  .amount-hint.over{color:var(--danger);}
+  .submit-btn{width:100%; padding:.85rem; border-radius:8px; border:none; background:var(--accent); color:var(--bg); font-weight:600; font-size:.9rem; cursor:pointer; font-family:inherit;}
+  .error-bar{background:#3a1212; color:#fca5a5; font-size:.75rem; padding:.5rem 1.25rem; display:flex; justify-content:space-between; align-items:center;}
+  .error-bar button{background:none; border:none; color:inherit; cursor:pointer;}
+</style>
+</head>
+<body>
+
+<div id="bootLoading"><div class="boot-dot"></div> Checking your session…</div>
+
+<div class="auth-screen" id="authScreen">
+  <div class="auth-card">
+    <div class="eyebrow">🏦 Loan Ledger</div>
+    <h1 class="display" id="authTitle">Sign in</h1>
+    <p class="auth-sub">Sign in to sync your withdrawals across every device.</p>
+    <div class="auth-error" id="authError"></div>
+    <label>Email</label>
+    <input type="email" id="authEmail" autocomplete="email" />
+    <label>Password</label>
+    <input type="password" id="authPassword" autocomplete="current-password" minlength="6" />
+    <button type="button" class="submit-btn" id="authSubmit">Sign in</button>
+    <p class="auth-toggle">
+      <span id="authToggleText">New here?</span><button type="button" id="authToggleBtn">Create an account</button>
+    </p>
+    <button type="button" class="auth-forgot" id="authForgot">Forgot password?</button>
+  </div>
+</div>
+
+<div id="appScreen" style="display:none;">
+  <header>
+    <div class="top-row">
+      <div class="eyebrow">🏦 Loan Ledger</div>
+      <select id="currency"></select>
+    </div>
+    <div class="account-row">
+      <span id="accountEmail"></span>
+      <button class="edit-limit-btn" id="signOutBtn">Sign out</button>
+    </div>
+    <h1 class="display">Every withdrawal, ticking.</h1>
+    <div class="owed-row">
+      <span class="owed-sym" id="owedSym"></span>
+      <span class="owed-num mono" id="owedNum">0.00</span>
+    </div>
+    <p class="owed-sub" id="owedSub"></p>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Principal</div>
+        <div class="stat-val mono" id="totalPrincipal">0.00</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Interest accrued</div>
+        <div class="stat-val mono accent" id="totalInterest">0.00</div>
+      </div>
+    </div>
+    <div class="limit-panel">
+      <div class="limit-bar-track"><div class="limit-bar-fill" id="limitBarFill"></div></div>
+      <div class="limit-row">
+        <button class="edit-limit-btn" id="editLimitBtn">Limit <span id="limitVal"></span> ✎</button>
+        <span id="availableVal" class="mono"></span>
+      </div>
+    </div>
+  </header>
+
+  <div id="errorBar"></div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="active" id="tabActive">Active (0)</button>
+    <button class="tab" data-tab="repaid" id="tabRepaid">Repaid (0)</button>
+  </div>
+
+  <div id="list"></div>
+
+  <button class="fab" id="fabBtn">+</button>
+
+  <div class="overlay" id="overlay"></div>
+  <div class="sheet" id="sheet">
+    <form id="addForm">
+      <div class="sheet-head">
+        <h2 class="display">New withdrawal</h2>
+        <button type="button" class="close-btn" id="closeSheet">&times;</button>
+      </div>
+
+      <label>Amount</label>
+      <input type="number" id="fAmount" min="0" step="0.01" inputmode="decimal" placeholder="50000" required />
+      <p class="amount-hint" id="amountHint"></p>
+
+      <label>Annual interest rate (%)</label>
+      <input type="number" id="fRate" min="0" step="0.01" inputmode="decimal" placeholder="12.5" required />
+
+      <label>Withdrawal date</label>
+      <input type="date" id="fDate" required />
+
+      <label>Interest type</label>
+      <div class="type-row">
+        <button type="button" class="type-btn selected" id="typeSimple" data-type="simple">Simple</button>
+        <button type="button" class="type-btn" id="typeCompound" data-type="compound">Compound daily</button>
+      </div>
+      <p class="hint">Simple: principal × (rate ÷ 365) × days. Compound: interest compounds once per day.</p>
+
+      <label>Note (optional)</label>
+      <input type="text" id="fNote" maxlength="40" placeholder="e.g. Equipment tranche" />
+
+      <button type="submit" class="submit-btn">Start the clock</button>
+    </form>
+  </div>
+
+  <div class="overlay" id="limitOverlay"></div>
+  <div class="sheet" id="limitSheet">
+    <form id="limitForm">
+      <div class="sheet-head">
+        <h2 class="display">Loan limit</h2>
+        <button type="button" class="close-btn" id="closeLimitSheet">&times;</button>
+      </div>
+      <label>Total sanctioned amount</label>
+      <input type="number" id="fLimit" min="0" step="1" inputmode="decimal" placeholder="8000000" required />
+      <p class="hint">Each active withdrawal's principal is deducted from this limit. Marking a withdrawal repaid frees it back up.</p>
+      <button type="submit" class="submit-btn">Save limit</button>
+    </form>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   1) PASTE YOUR FIREBASE CONFIG BELOW
+   Firebase console → Project settings → General → Your apps → Web app → SDK config
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyCKAIU9GjJkOI8dGTtwRvA0JdbRLc4D2wc",
+  authDomain: "loan-2a72c.firebaseapp.com",
+  projectId: "loan-2a72c",
+  storageBucket: "loan-2a72c.firebasestorage.app",
+  messagingSenderId: "578507452373",
+  appId: "1:578507452373:web:a02c57a40d021b67a1575c"
+};
+/* ============================================================ */
+
+const CURRENCIES = { BDT:'৳', USD:'$', EUR:'€', GBP:'£', INR:'₹' };
+const DEFAULT_LIMIT = 8000000; // 80 lakh
+const LOCAL_KEY = 'loan-ledger-data';
+const CONFIGURED = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith('YOUR_');
+
+function pad(n){ return String(n).padStart(2,'0'); }
+function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function toUTC(s){ const [y,m,d]=s.split('-').map(Number); return Date.UTC(y,m-1,d); }
+function daysBetween(a,b){ return Math.max(0, Math.round((toUTC(b)-toUTC(a))/86400000)); }
+function calcInterest(p,ratePct,days,type){
+  const dr = ratePct/100/365;
+  if(type==='compound') return p*(Math.pow(1+dr,days)-1);
+  return p*dr*days;
+}
+function fmtNum(n){ return (Number.isFinite(n)?n:0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtLakh(n){
+  const num = Number.isFinite(n) ? n : 0;
+  const sign = num < 0 ? '-' : '';
+  const fixed = Math.abs(num).toFixed(2);
+  let [intPart, dec] = fixed.split('.');
+  const lastThree = intPart.slice(-3);
+  let other = intPart.slice(0, -3);
+  if(other !== ''){
+    other = other.replace(/\B(?=(\d{2})+(?!\d))/g, ',');
+    return `${sign}${other},${lastThree}.${dec}`;
+  }
+  return `${sign}${lastThree}.${dec}`;
+}
+function fmtAmount(n){ return data.currency==='BDT' ? fmtLakh(n) : fmtNum(n); }
+function fmtDate(s){
+  const [y,m,d]=s.split('-').map(Number);
+  return new Date(Date.UTC(y,m-1,d)).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});
+}
+function uid(){ return Date.now()+'-'+Math.random().toString(36).slice(2,8); }
+
+let data = { withdrawals: [], currency: 'BDT', baseLimit: DEFAULT_LIMIT };
+let currentTab = 'active';
+let prevOwed = 0, prevInterest = 0, prevAvailable = DEFAULT_LIMIT;
+let currentUser = null;
+let auth = null, db = null;
+
+function showError(msg){
+  const bar = document.getElementById('errorBar');
+  if(!bar) return;
+  bar.innerHTML = msg ? `<div class="error-bar"><span>${msg}</span><button onclick="document.getElementById('errorBar').innerHTML=''">&times;</button></div>` : '';
+}
+
+function save(){
+  if(CONFIGURED){
+    if(!currentUser || !db) return;
+    db.collection('ledgers').doc(currentUser.uid).set(data).catch(()=>{
+      showError('Could not save — check your connection.');
+    });
+  } else {
+    try{ localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); showError(null); }
+    catch(e){ showError('Could not save — your browser storage may be full or blocked.'); }
+  }
+}
+
+function enrich(w){
+  const end = w.repaid ? w.repaidDate : todayISO();
+  const days = daysBetween(w.date, end);
+  const interest = calcInterest(w.amount, w.rate, days, w.type);
+  return { ...w, days, interest, total: w.amount + interest };
+}
+
+function animateNumber(el, from, to, ms=600){
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(reduce || from === to){ el.textContent = fmtAmount(to); return; }
+  const start = performance.now();
+  function tick(now){
+    const t = Math.min(1,(now-start)/ms);
+    const eased = 1-Math.pow(1-t,3);
+    el.textContent = fmtAmount(from + (to-from)*eased);
+    if(t<1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function updateAmountHint(){
+  const amount = parseFloat(document.getElementById('fAmount').value);
+  const hint = document.getElementById('amountHint');
+  if(isNaN(amount) || amount<=0){ hint.textContent=''; hint.classList.remove('over'); return; }
+  const active = data.withdrawals.map(enrich).filter(w=>!w.repaid);
+  const drawn = active.reduce((s,w)=>s+w.amount,0);
+  const sym = CURRENCIES[data.currency] || '';
+  const projected = data.baseLimit - drawn - amount;
+  hint.textContent = `Available after this: ${sym}${fmtAmount(projected)}${projected<0 ? ' — exceeds your limit' : ''}`;
+  hint.classList.toggle('over', projected<0);
+}
+
+function render(){
+  const sym = CURRENCIES[data.currency] || '';
+  document.getElementById('owedSym').textContent = sym;
+
+  const enriched = data.withdrawals.map(enrich);
+  const active = enriched.filter(w=>!w.repaid).sort((a,b)=>b.date.localeCompare(a.date));
+  const repaid = enriched.filter(w=>w.repaid).sort((a,b)=>(b.repaidDate||'').localeCompare(a.repaidDate||''));
+
+  const totalPrincipal = active.reduce((s,w)=>s+w.amount,0);
+  const totalInterest = active.reduce((s,w)=>s+w.interest,0);
+  const totalOwed = totalPrincipal + totalInterest;
+  const available = data.baseLimit - totalPrincipal;
+  const overLimit = available < 0;
+  const barPct = data.baseLimit > 0 ? Math.min(100, (totalPrincipal/data.baseLimit)*100) : 0;
+
+  document.getElementById('totalPrincipal').textContent = sym + fmtAmount(totalPrincipal);
+
+  const owedNumEl = document.getElementById('owedNum');
+  animateNumber(owedNumEl, prevOwed, totalOwed);
+  prevOwed = totalOwed;
+
+  const interestEl = document.getElementById('totalInterest');
+  interestEl.innerHTML = sym + '<span id="interestAnim"></span>';
+  animateNumber(document.getElementById('interestAnim'), prevInterest, totalInterest);
+  prevInterest = totalInterest;
+
+  document.getElementById('owedSub').textContent =
+    `total owed across ${active.length} active withdrawal${active.length===1?'':'s'}`;
+
+  document.getElementById('limitVal').textContent = sym + fmtAmount(data.baseLimit);
+  const fill = document.getElementById('limitBarFill');
+  fill.style.width = barPct + '%';
+  fill.classList.toggle('over', overLimit);
+  const availEl = document.getElementById('availableVal');
+  availEl.innerHTML = `Available <span id="availAnim"></span>`;
+  availEl.classList.toggle('over', overLimit);
+  animateNumber(document.getElementById('availAnim'), prevAvailable, available);
+  prevAvailable = available;
+
+  document.getElementById('tabActive').textContent = `Active (${active.length})`;
+  document.getElementById('tabRepaid').textContent = `Repaid (${repaid.length})`;
+  document.getElementById('tabActive').classList.toggle('active', currentTab==='active');
+  document.getElementById('tabRepaid').classList.toggle('active', currentTab==='repaid');
+
+  const list = document.getElementById('list');
+  if(currentTab==='active'){
+    list.innerHTML = active.length===0
+      ? `<div class="empty">No active withdrawals — add one to start the clock.</div>`
+      : active.map(w => `
+        <div class="card">
+          <div class="card-top">
+            <div>
+              <div class="card-title">${escapeHtml(w.note||'Withdrawal')}</div>
+              <div class="card-meta">📅 ${fmtDate(w.date)} · ${w.rate}%/yr · ${w.type==='compound'?'compound daily':'simple'}</div>
+            </div>
+            <div class="days-badge"><span class="dot"></span> ${w.days}d</div>
+          </div>
+          <div class="figures">
+            <div class="fig">
+              <div class="fig-label">Principal</div>
+              <div class="fig-val mono">${sym}${fmtAmount(w.amount)}</div>
+            </div>
+            <div class="fig right">
+              <div class="fig-label">Interest</div>
+              <div class="fig-val mono accent">+${sym}${fmtAmount(w.interest)}</div>
+            </div>
+            <div class="fig right">
+              <div class="fig-label">Owed today</div>
+              <div class="fig-val mono strong">${sym}${fmtAmount(w.total)}</div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn" data-action="repay" data-id="${w.id}">✓ Mark repaid</button>
+            <button class="btn icon-only" data-action="delete" data-id="${w.id}">🗑</button>
+          </div>
+        </div>
+      `).join('');
+  } else {
+    list.innerHTML = repaid.length===0
+      ? `<div class="empty">Nothing repaid yet.</div>`
+      : repaid.map(w => `
+        <div class="card repaid">
+          <div class="card-top">
+            <div>
+              <div class="card-title">${escapeHtml(w.note||'Withdrawal')}</div>
+              <div class="card-meta">${fmtDate(w.date)} → ${fmtDate(w.repaidDate)} · ${w.days}d · ${w.rate}%/yr</div>
+            </div>
+          </div>
+          <div class="figures">
+            <div class="fig">
+              <div class="fig-label">Principal</div>
+              <div class="fig-val mono">${sym}${fmtAmount(w.amount)}</div>
+            </div>
+            <div class="fig right">
+              <div class="fig-label">Interest paid</div>
+              <div class="fig-val mono">${sym}${fmtAmount(w.interest)}</div>
+            </div>
+            <div class="fig right">
+              <div class="fig-label">Settled</div>
+              <div class="fig-val mono strong">${sym}${fmtAmount(w.total)}</div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn" data-action="reopen" data-id="${w.id}">↺ Reopen</button>
+            <button class="btn icon-only" data-action="delete" data-id="${w.id}">🗑</button>
+          </div>
+        </div>
+      `).join('');
+  }
+
+  updateAmountHint();
+}
+
+function escapeHtml(s){
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ---------- Currency, tabs, list actions ---------- */
+const currencySelect = document.getElementById('currency');
+currencySelect.innerHTML = Object.keys(CURRENCIES).map(c=>`<option value="${c}">${c}</option>`).join('');
+currencySelect.addEventListener('change', e => {
+  data.currency = e.target.value;
+  save(); render();
+});
+
+document.getElementById('tabActive').addEventListener('click', ()=>{ currentTab='active'; render(); });
+document.getElementById('tabRepaid').addEventListener('click', ()=>{ currentTab='repaid'; render(); });
+
+document.getElementById('list').addEventListener('click', e=>{
+  const btn = e.target.closest('button[data-action]');
+  if(!btn) return;
+  const id = btn.dataset.id;
+  const action = btn.dataset.action;
+  const idx = data.withdrawals.findIndex(w=>w.id===id);
+  if(idx===-1) return;
+  if(action==='repay'){ data.withdrawals[idx].repaid = true; data.withdrawals[idx].repaidDate = todayISO(); }
+  if(action==='reopen'){ data.withdrawals[idx].repaid = false; data.withdrawals[idx].repaidDate = null; }
+  if(action==='delete'){ data.withdrawals.splice(idx,1); }
+  save(); render();
+});
+
+/* ---------- Withdrawal sheet ---------- */
+const sheet = document.getElementById('sheet');
+const overlay = document.getElementById('overlay');
+function openSheet(){
+  document.getElementById('fDate').max = todayISO();
+  if(!document.getElementById('fDate').value) document.getElementById('fDate').value = todayISO();
+  sheet.classList.add('open'); overlay.classList.add('open');
+}
+function closeSheet(){ sheet.classList.remove('open'); overlay.classList.remove('open'); }
+document.getElementById('fabBtn').addEventListener('click', openSheet);
+document.getElementById('closeSheet').addEventListener('click', closeSheet);
+overlay.addEventListener('click', closeSheet);
+document.getElementById('fAmount').addEventListener('input', updateAmountHint);
+
+/* ---------- Limit sheet ---------- */
+const limitSheet = document.getElementById('limitSheet');
+const limitOverlay = document.getElementById('limitOverlay');
+function openLimitSheet(){
+  document.getElementById('fLimit').value = data.baseLimit;
+  limitSheet.classList.add('open'); limitOverlay.classList.add('open');
+}
+function closeLimitSheet(){ limitSheet.classList.remove('open'); limitOverlay.classList.remove('open'); }
+document.getElementById('editLimitBtn').addEventListener('click', openLimitSheet);
+document.getElementById('closeLimitSheet').addEventListener('click', closeLimitSheet);
+limitOverlay.addEventListener('click', closeLimitSheet);
+document.getElementById('limitForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const val = parseFloat(document.getElementById('fLimit').value);
+  if(isNaN(val) || val<0) return;
+  data.baseLimit = val;
+  save();
+  closeLimitSheet();
+  render();
+});
+
+/* ---------- Interest type toggle ---------- */
+let selectedType = 'simple';
+const typeSimple = document.getElementById('typeSimple');
+const typeCompound = document.getElementById('typeCompound');
+typeSimple.addEventListener('click', ()=>{ selectedType='simple'; typeSimple.classList.add('selected'); typeCompound.classList.remove('selected'); });
+typeCompound.addEventListener('click', ()=>{ selectedType='compound'; typeCompound.classList.add('selected'); typeSimple.classList.remove('selected'); });
+
+/* ---------- Add withdrawal ---------- */
+document.getElementById('addForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const amount = parseFloat(document.getElementById('fAmount').value);
+  const rate = parseFloat(document.getElementById('fRate').value);
+  const date = document.getElementById('fDate').value;
+  const note = document.getElementById('fNote').value.trim();
+  if(!amount || amount<=0 || isNaN(rate) || rate<0 || !date) return;
+
+  data.withdrawals.unshift({
+    id: uid(), amount, rate, date, type: selectedType,
+    note, repaid:false, repaidDate:null
+  });
+  save();
+
+  e.target.reset();
+  selectedType='simple'; typeSimple.classList.add('selected'); typeCompound.classList.remove('selected');
+  closeSheet();
+  currentTab='active';
+  render();
+});
+
+setInterval(()=>{ if(currentUser) render(); }, 60000);
+
+/* ============================================================
+   2) AUTH — email/password sign-in, synced via Firestore
+   ============================================================ */
+function friendlyAuthError(e){
+  const map = {
+    'auth/email-already-in-use':'That email already has an account — try signing in instead.',
+    'auth/invalid-email':'That email address looks invalid.',
+    'auth/weak-password':'Password should be at least 6 characters.',
+    'auth/user-not-found':'No account found with that email.',
+    'auth/wrong-password':'Incorrect password.',
+    'auth/invalid-credential':'Incorrect email or password.',
+    'auth/missing-password':'Enter a password.',
+  };
+  return map[e.code] || e.message;
+}
+
+let authMode = 'signin';
+const authTitle = document.getElementById('authTitle');
+const authSubmit = document.getElementById('authSubmit');
+const authToggleText = document.getElementById('authToggleText');
+const authToggleBtn = document.getElementById('authToggleBtn');
+const authErrorEl = document.getElementById('authError');
+
+function setAuthMode(mode){
+  authMode = mode;
+  if(mode==='signin'){
+    authTitle.textContent='Sign in';
+    authSubmit.textContent='Sign in';
+    authToggleText.textContent='New here?';
+    authToggleBtn.textContent='Create an account';
+  } else {
+    authTitle.textContent='Create account';
+    authSubmit.textContent='Create account';
+    authToggleText.textContent='Already have an account?';
+    authToggleBtn.textContent='Sign in instead';
+  }
+  authErrorEl.textContent='';
+}
+authToggleBtn.addEventListener('click', ()=> setAuthMode(authMode==='signin' ? 'signup' : 'signin'));
+
+authSubmit.addEventListener('click', async ()=>{
+  if(!CONFIGURED) return;
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  authErrorEl.textContent = '';
+  try{
+    if(authMode==='signin'){
+      await auth.signInWithEmailAndPassword(email, password);
+    } else {
+      await auth.createUserWithEmailAndPassword(email, password);
+    }
+  }catch(e){
+    authErrorEl.textContent = friendlyAuthError(e);
+  }
+});
+
+document.getElementById('authForgot').addEventListener('click', async ()=>{
+  if(!CONFIGURED) return;
+  const email = document.getElementById('authEmail').value.trim();
+  if(!email){ authErrorEl.textContent = 'Enter your email above first.'; return; }
+  try{
+    await auth.sendPasswordResetEmail(email);
+    authErrorEl.textContent = 'Password reset email sent — check your inbox.';
+  }catch(e){
+    authErrorEl.textContent = friendlyAuthError(e);
+  }
+});
+
+document.getElementById('signOutBtn').addEventListener('click', ()=>{ if(auth) auth.signOut(); });
+
+/* ---------- Boot ---------- */
+let unsubscribeSnapshot = null;
+let bootTimedOut = false;
+
+if(CONFIGURED){
+  setTimeout(()=>{
+    if(!bootTimedOut){
+      document.getElementById('bootLoading').innerHTML =
+        '<div style="max-width:320px;text-align:center;font-size:.8rem;color:#a8a29e;">' +
+        "This is taking too long — Firebase couldn't be reached. " +
+        "If you opened this file locally on your phone (content:// or file://), try hosting it online instead " +
+        "(e.g. GitHub Pages) and opening it from that web address. " +
+        'You can also try reloading or switching browsers.</div>';
+    }
+  }, 10000);
+
+  firebase.initializeApp(firebaseConfig);
+  auth = firebase.auth();
+  db = firebase.firestore();
+  db.enablePersistence().catch(()=>{ /* multiple tabs open, or unsupported browser — fine */ });
+
+  auth.onAuthStateChanged(user => {
+    bootTimedOut = true; // a real response arrived, cancel the timeout concern
+    currentUser = user;
+    document.getElementById('bootLoading').style.display = 'none';
+    if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+
+    if(user){
+      document.getElementById('authScreen').style.display = 'none';
+      document.getElementById('appScreen').style.display = 'block';
+      document.getElementById('accountEmail').textContent = user.email;
+
+      unsubscribeSnapshot = db.collection('ledgers').doc(user.uid).onSnapshot(doc => {
+        if(doc.exists){
+          const remote = doc.data();
+          data = {
+            withdrawals: remote.withdrawals || [],
+            currency: remote.currency || 'BDT',
+            baseLimit: typeof remote.baseLimit === 'number' ? remote.baseLimit : DEFAULT_LIMIT
+          };
+        } else {
+          data = { withdrawals: [], currency: 'BDT', baseLimit: DEFAULT_LIMIT };
+          db.collection('ledgers').doc(user.uid).set(data).catch(()=>{});
+        }
+        currencySelect.value = data.currency;
+        render();
+      }, err => {
+        showError('Sync error: ' + err.message);
+      });
+    } else {
+      document.getElementById('appScreen').style.display = 'none';
+      document.getElementById('authScreen').style.display = 'flex';
+      currencySelect.value = 'BDT';
+    }
+  });
+} else {
+  // No Firebase config yet — run fully local on this device (no login).
+  try{
+    const raw = localStorage.getItem(LOCAL_KEY);
+    if(raw) data = Object.assign({ withdrawals: [], currency: 'BDT', baseLimit: DEFAULT_LIMIT }, JSON.parse(raw));
+  }catch(e){ /* start fresh */ }
+  if(typeof data.baseLimit !== 'number') data.baseLimit = DEFAULT_LIMIT;
+
+  document.getElementById('bootLoading').style.display = 'none';
+  document.getElementById('authScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display = 'block';
+  document.getElementById('accountEmail').textContent = 'Saved on this device only — add Firebase config to sync';
+  document.getElementById('signOutBtn').style.display = 'none';
+  currencySelect.value = data.currency;
+  render();
+}
+</script>
+</body>
+</html>
