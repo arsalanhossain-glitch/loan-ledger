@@ -20,7 +20,7 @@
     --accent:#fbbf24; --danger:#f87171;
   }
   *{box-sizing:border-box;}
-  body{margin:0; background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; padding-bottom:7rem;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; padding-bottom:9.5rem;}
   .display{font-family:'Fraunces',Georgia,serif;}
   .mono{font-family:'IBM Plex Mono','Courier New',monospace; font-variant-numeric:tabular-nums;}
   .muted{color:var(--muted);}
@@ -90,6 +90,13 @@
   .empty{padding:3rem 1.25rem; text-align:center; font-size:.875rem; color:var(--muted2);}
   .fab{position:fixed; bottom:1.5rem; right:1.25rem; width:56px; height:56px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; font-size:1.6rem; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.4);}
   .fab:active{transform:scale(.95);}
+  .fab-repay{bottom:6.25rem; background:#34d399; font-size:1.4rem;}
+  .repay-option{display:flex; justify-content:space-between; align-items:center; gap:.5rem; padding:.75rem; border:1px solid var(--line); border-radius:8px; margin-bottom:.5rem; cursor:pointer; background:none; width:100%; text-align:left; font-family:inherit; color:var(--text);}
+  .repay-option.selected{border-color:#34d399;}
+  .repay-option-title{display:block; font-size:.85rem; font-weight:500;}
+  .repay-option-meta{font-size:.7rem; color:var(--muted2); margin-top:.15rem;}
+  .repay-option-amt{font-family:'IBM Plex Mono','Courier New',monospace; font-size:.85rem; white-space:nowrap;}
+  .submit-btn:disabled{opacity:.4; cursor:not-allowed;}
   .overlay{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:40; display:none;}
   .overlay.open{display:block;}
   .sheet{position:fixed; left:0; right:0; bottom:0; background:var(--surface); border-top:1px solid var(--line); border-radius:18px 18px 0 0; padding:1.25rem 1.25rem 2rem; max-height:85vh; overflow-y:auto; z-index:50; transform:translateY(100%); transition:transform .25s ease; }
@@ -181,6 +188,7 @@
   <div id="list"></div>
 
   <button class="fab" id="fabBtn">+</button>
+  <button class="fab fab-repay" id="repayFabBtn" title="Mark a withdrawal repaid">✓</button>
 
   <div class="overlay" id="overlay"></div>
   <div class="sheet" id="sheet">
@@ -226,6 +234,19 @@
       <p class="hint">Each active withdrawal's principal is deducted from this limit. Marking a withdrawal repaid frees it back up.</p>
       <button type="submit" class="submit-btn">Save limit</button>
     </form>
+  </div>
+
+  <div class="overlay" id="repayOverlay"></div>
+  <div class="sheet" id="repaySheet">
+    <div class="sheet-head">
+      <h2 class="display">Mark as repaid</h2>
+      <button type="button" class="close-btn" id="closeRepaySheet">&times;</button>
+    </div>
+    <label>Which withdrawal?</label>
+    <div id="repayList"></div>
+    <label>Repaid date</label>
+    <input type="date" id="repayDate" />
+    <button type="button" class="submit-btn" id="repayConfirmBtn">Mark as repaid</button>
   </div>
 </div>
 
@@ -508,6 +529,66 @@ document.getElementById('limitForm').addEventListener('submit', e=>{
   data.baseLimit = val;
   save();
   closeLimitSheet();
+  render();
+});
+
+/* ---------- Repay sheet (quick "mark repaid" button) ---------- */
+let selectedRepayId = null;
+const repaySheet = document.getElementById('repaySheet');
+const repayOverlay = document.getElementById('repayOverlay');
+const repayConfirmBtn = document.getElementById('repayConfirmBtn');
+
+function openRepaySheet(){
+  const sym = CURRENCIES[data.currency] || '';
+  const active = data.withdrawals.map(enrich).filter(w=>!w.repaid).sort((a,b)=>b.date.localeCompare(a.date));
+  selectedRepayId = active.length ? active[0].id : null;
+  const listEl = document.getElementById('repayList');
+
+  if(active.length===0){
+    listEl.innerHTML = `<p class="hint" style="margin-top:0;">No active withdrawals to repay.</p>`;
+  } else {
+    listEl.innerHTML = active.map(w => `
+      <button type="button" class="repay-option ${w.id===selectedRepayId?'selected':''}" data-id="${w.id}">
+        <span>
+          <span class="repay-option-title">${escapeHtml(w.note||'Withdrawal')}</span>
+          <span class="repay-option-meta">${fmtDate(w.date)} · ${w.days}d</span>
+        </span>
+        <span class="repay-option-amt">${sym}${fmtAmount(w.total)}</span>
+      </button>
+    `).join('');
+  }
+
+  const dateInput = document.getElementById('repayDate');
+  dateInput.max = todayISO();
+  dateInput.value = todayISO();
+  repayConfirmBtn.disabled = active.length===0;
+  repaySheet.classList.add('open'); repayOverlay.classList.add('open');
+}
+function closeRepaySheet(){ repaySheet.classList.remove('open'); repayOverlay.classList.remove('open'); }
+
+document.getElementById('repayFabBtn').addEventListener('click', openRepaySheet);
+document.getElementById('closeRepaySheet').addEventListener('click', closeRepaySheet);
+repayOverlay.addEventListener('click', closeRepaySheet);
+
+document.getElementById('repayList').addEventListener('click', e=>{
+  const btn = e.target.closest('.repay-option');
+  if(!btn) return;
+  selectedRepayId = btn.dataset.id;
+  document.querySelectorAll('#repayList .repay-option').forEach(el=>{
+    el.classList.toggle('selected', el.dataset.id===selectedRepayId);
+  });
+});
+
+repayConfirmBtn.addEventListener('click', ()=>{
+  if(!selectedRepayId) return;
+  const date = document.getElementById('repayDate').value || todayISO();
+  const idx = data.withdrawals.findIndex(w=>w.id===selectedRepayId);
+  if(idx===-1) return;
+  data.withdrawals[idx].repaid = true;
+  data.withdrawals[idx].repaidDate = date;
+  save();
+  closeRepaySheet();
+  currentTab = 'repaid';
   render();
 });
 
