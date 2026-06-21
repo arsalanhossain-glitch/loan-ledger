@@ -88,9 +88,15 @@
   .btn.icon-only{flex:none; padding:.55rem .75rem;}
   .btn.icon-only:hover{color:var(--danger); border-color:var(--danger);}
   .empty{padding:3rem 1.25rem; text-align:center; font-size:.875rem; color:var(--muted2);}
-  .fab{position:fixed; bottom:1.5rem; right:1.25rem; width:56px; height:56px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; font-size:1.6rem; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.4);}
+  .fab-wrap{position:fixed; bottom:1.5rem; right:1.25rem; display:flex; flex-direction:column; align-items:flex-end; gap:.75rem; z-index:45;}
+  .fab{width:56px; height:56px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; font-size:1.6rem; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.4); transition:transform .2s ease;}
   .fab:active{transform:scale(.95);}
-  .fab-repay{bottom:6.25rem; background:#34d399; font-size:1.4rem;}
+  .fab.open{transform:rotate(45deg);}
+  .fab-menu{display:flex; flex-direction:column; align-items:flex-end; gap:.6rem; opacity:0; pointer-events:none; transform:translateY(8px); transition:opacity .2s ease, transform .2s ease;}
+  .fab-menu.open{opacity:1; pointer-events:auto; transform:translateY(0);}
+  .fab-mini{display:flex; align-items:center; background:var(--surface); border:1px solid var(--line); border-radius:999px; padding:.65rem 1.2rem; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.35); font-family:inherit;}
+  .fab-mini-label{font-size:.85rem; font-weight:700; color:var(--accent); white-space:nowrap;}
+  .fab-mini-repay .fab-mini-label{color:#34d399;}
   .repay-option{display:flex; justify-content:space-between; align-items:center; gap:.5rem; padding:.75rem; border:1px solid var(--line); border-radius:8px; margin-bottom:.5rem; cursor:pointer; background:none; width:100%; text-align:left; font-family:inherit; color:var(--text);}
   .repay-option.selected{border-color:#34d399;}
   .repay-option-title{display:block; font-size:.85rem; font-weight:500;}
@@ -187,8 +193,17 @@
 
   <div id="list"></div>
 
-  <button class="fab" id="fabBtn">+</button>
-  <button class="fab fab-repay" id="repayFabBtn" title="Mark a withdrawal repaid">✓</button>
+  <div class="fab-wrap" id="fabWrap">
+    <div class="fab-menu" id="fabMenu">
+      <button type="button" class="fab-mini fab-mini-repay" id="menuRepayBtn">
+        <span class="fab-mini-label">Repay</span>
+      </button>
+      <button type="button" class="fab-mini" id="menuWithdrawBtn">
+        <span class="fab-mini-label">Withdrawal</span>
+      </button>
+    </div>
+    <button class="fab" id="fabBtn">+</button>
+  </div>
 
   <div class="overlay" id="overlay"></div>
   <div class="sheet" id="sheet">
@@ -239,14 +254,21 @@
   <div class="overlay" id="repayOverlay"></div>
   <div class="sheet" id="repaySheet">
     <div class="sheet-head">
-      <h2 class="display">Mark as repaid</h2>
+      <h2 class="display">Record a repayment</h2>
       <button type="button" class="close-btn" id="closeRepaySheet">&times;</button>
     </div>
     <label>Which withdrawal?</label>
     <div id="repayList"></div>
-    <label>Repaid date</label>
+
+    <label>Repayment amount</label>
+    <input type="number" id="repayAmount" min="0" step="0.01" inputmode="decimal" placeholder="0.00" />
+    <p class="hint" id="repayOwedHint" style="margin:-.6rem 0 1rem;"></p>
+    <button type="button" class="edit-limit-btn" id="payInFullBtn" style="margin:-.5rem 0 1.2rem;">Pay in full ✎</button>
+
+    <label>Repayment date</label>
     <input type="date" id="repayDate" />
-    <button type="button" class="submit-btn" id="repayConfirmBtn">Mark as repaid</button>
+    <p class="hint">Payments are applied to accrued interest first — anything left over reduces the principal.</p>
+    <button type="button" class="submit-btn" id="repayConfirmBtn">Record repayment</button>
   </div>
 </div>
 
@@ -325,10 +347,32 @@ function save(){
 }
 
 function enrich(w){
-  const end = w.repaid ? w.repaidDate : todayISO();
-  const days = daysBetween(w.date, end);
-  const interest = calcInterest(w.amount, w.rate, days, w.type);
-  return { ...w, days, interest, total: w.amount + interest };
+  const payments = (w.payments || []).slice().sort((a,b)=> a.date.localeCompare(b.date));
+  const endCap = w.repaid ? (w.repaidDate || todayISO()) : todayISO();
+  let principal = w.amount;
+  let unpaidInterest = 0;
+  let cursor = w.date;
+  let totalPaid = 0;
+
+  for(const p of payments){
+    const periodDays = daysBetween(cursor, p.date);
+    unpaidInterest += calcInterest(principal, w.rate, periodDays, w.type);
+    let pay = p.amount;
+    totalPaid += pay;
+    const interestPortion = Math.min(pay, unpaidInterest);
+    unpaidInterest -= interestPortion;
+    pay -= interestPortion;
+    const principalPortion = Math.min(pay, principal);
+    principal -= principalPortion;
+    cursor = p.date;
+  }
+
+  const finalDays = daysBetween(cursor, endCap);
+  unpaidInterest += calcInterest(principal, w.rate, finalDays, w.type);
+
+  const totalDays = daysBetween(w.date, endCap);
+  const total = principal + unpaidInterest;
+  return { ...w, days: totalDays, principal, interest: unpaidInterest, total, totalPaid };
 }
 
 function animateNumber(el, from, to, ms=600){
@@ -349,7 +393,7 @@ function updateAmountHint(){
   const hint = document.getElementById('amountHint');
   if(isNaN(amount) || amount<=0){ hint.textContent=''; hint.classList.remove('over'); return; }
   const active = data.withdrawals.map(enrich).filter(w=>!w.repaid);
-  const drawn = active.reduce((s,w)=>s+w.amount,0);
+  const drawn = active.reduce((s,w)=>s+w.principal,0);
   const sym = CURRENCIES[data.currency] || '';
   const projected = data.baseLimit - drawn - amount;
   hint.textContent = `Available after this: ${sym}${fmtAmount(projected)}${projected<0 ? ' — exceeds your limit' : ''}`;
@@ -364,7 +408,7 @@ function render(){
   const active = enriched.filter(w=>!w.repaid).sort((a,b)=>b.date.localeCompare(a.date));
   const repaid = enriched.filter(w=>w.repaid).sort((a,b)=>(b.repaidDate||'').localeCompare(a.repaidDate||''));
 
-  const totalPrincipal = active.reduce((s,w)=>s+w.amount,0);
+  const totalPrincipal = active.reduce((s,w)=>s+w.principal,0);
   const totalInterest = active.reduce((s,w)=>s+w.interest,0);
   const totalOwed = totalPrincipal + totalInterest;
   const available = data.baseLimit - totalPrincipal;
@@ -409,14 +453,14 @@ function render(){
           <div class="card-top">
             <div>
               <div class="card-title">${escapeHtml(w.note||'Withdrawal')}</div>
-              <div class="card-meta">📅 ${fmtDate(w.date)} · ${w.rate}%/yr · ${w.type==='compound'?'compound daily':'simple'}</div>
+              <div class="card-meta">📅 ${fmtDate(w.date)} · ${w.rate}%/yr · ${w.type==='compound'?'compound daily':'simple'}${w.totalPaid>0 ? ' · '+sym+fmtAmount(w.totalPaid)+' paid' : ''}</div>
             </div>
             <div class="days-badge"><span class="dot"></span> ${w.days}d</div>
           </div>
           <div class="figures">
             <div class="fig">
               <div class="fig-label">Principal</div>
-              <div class="fig-val mono">${sym}${fmtAmount(w.amount)}</div>
+              <div class="fig-val mono">${sym}${fmtAmount(w.principal)}</div>
             </div>
             <div class="fig right">
               <div class="fig-label">Interest</div>
@@ -428,7 +472,7 @@ function render(){
             </div>
           </div>
           <div class="actions">
-            <button class="btn" data-action="repay" data-id="${w.id}">✓ Mark repaid</button>
+            <button class="btn" data-action="repay" data-id="${w.id}">✓ Settle in full</button>
             <button class="btn icon-only" data-action="delete" data-id="${w.id}">🗑</button>
           </div>
         </div>
@@ -451,11 +495,11 @@ function render(){
             </div>
             <div class="fig right">
               <div class="fig-label">Interest paid</div>
-              <div class="fig-val mono">${sym}${fmtAmount(w.interest)}</div>
+              <div class="fig-val mono">${sym}${fmtAmount(Math.max(0, w.totalPaid - w.amount))}</div>
             </div>
             <div class="fig right">
               <div class="fig-label">Settled</div>
-              <div class="fig-val mono strong">${sym}${fmtAmount(w.total)}</div>
+              <div class="fig-val mono strong">${sym}${fmtAmount(w.totalPaid)}</div>
             </div>
           </div>
           <div class="actions">
@@ -491,7 +535,17 @@ document.getElementById('list').addEventListener('click', e=>{
   const action = btn.dataset.action;
   const idx = data.withdrawals.findIndex(w=>w.id===id);
   if(idx===-1) return;
-  if(action==='repay'){ data.withdrawals[idx].repaid = true; data.withdrawals[idx].repaidDate = todayISO(); }
+  if(action==='repay'){
+    const w = data.withdrawals[idx];
+    const result = enrich(w);
+    const payDate = todayISO();
+    if(result.total > 0.0001){
+      w.payments = w.payments || [];
+      w.payments.push({ date: payDate, amount: result.total });
+    }
+    w.repaid = true;
+    w.repaidDate = payDate;
+  }
   if(action==='reopen'){ data.withdrawals[idx].repaid = false; data.withdrawals[idx].repaidDate = null; }
   if(action==='delete'){ data.withdrawals.splice(idx,1); }
   save(); render();
@@ -506,7 +560,21 @@ function openSheet(){
   sheet.classList.add('open'); overlay.classList.add('open');
 }
 function closeSheet(){ sheet.classList.remove('open'); overlay.classList.remove('open'); }
-document.getElementById('fabBtn').addEventListener('click', openSheet);
+/* ---------- FAB speed-dial menu ---------- */
+let fabMenuOpen = false;
+const fabBtn = document.getElementById('fabBtn');
+const fabMenu = document.getElementById('fabMenu');
+function toggleFabMenu(force){
+  fabMenuOpen = typeof force === 'boolean' ? force : !fabMenuOpen;
+  fabBtn.classList.toggle('open', fabMenuOpen);
+  fabMenu.classList.toggle('open', fabMenuOpen);
+}
+fabBtn.addEventListener('click', ()=> toggleFabMenu());
+document.getElementById('menuWithdrawBtn').addEventListener('click', ()=>{ toggleFabMenu(false); openSheet(); });
+document.getElementById('menuRepayBtn').addEventListener('click', ()=>{ toggleFabMenu(false); openRepaySheet(); });
+document.addEventListener('click', e=>{
+  if(fabMenuOpen && !e.target.closest('#fabWrap')) toggleFabMenu(false);
+});
 document.getElementById('closeSheet').addEventListener('click', closeSheet);
 overlay.addEventListener('click', closeSheet);
 document.getElementById('fAmount').addEventListener('input', updateAmountHint);
@@ -532,22 +600,36 @@ document.getElementById('limitForm').addEventListener('submit', e=>{
   render();
 });
 
-/* ---------- Repay sheet (quick "mark repaid" button) ---------- */
+/* ---------- Repay sheet (record a partial or full repayment) ---------- */
 let selectedRepayId = null;
+let repayActiveCache = [];
 const repaySheet = document.getElementById('repaySheet');
 const repayOverlay = document.getElementById('repayOverlay');
 const repayConfirmBtn = document.getElementById('repayConfirmBtn');
+const repayAmountInput = document.getElementById('repayAmount');
+const repayOwedHint = document.getElementById('repayOwedHint');
+
+function selectedRepayWithdrawal(){
+  return repayActiveCache.find(w => w.id === selectedRepayId) || null;
+}
+
+function updateRepayOwedHint(){
+  const sym = CURRENCIES[data.currency] || '';
+  const w = selectedRepayWithdrawal();
+  if(!w){ repayOwedHint.textContent=''; return; }
+  repayOwedHint.textContent = `Currently owed: ${sym}${fmtAmount(w.total)} (${sym}${fmtAmount(w.principal)} principal + ${sym}${fmtAmount(w.interest)} interest)`;
+}
 
 function openRepaySheet(){
   const sym = CURRENCIES[data.currency] || '';
-  const active = data.withdrawals.map(enrich).filter(w=>!w.repaid).sort((a,b)=>b.date.localeCompare(a.date));
-  selectedRepayId = active.length ? active[0].id : null;
+  repayActiveCache = data.withdrawals.map(enrich).filter(w=>!w.repaid).sort((a,b)=>b.date.localeCompare(a.date));
+  selectedRepayId = repayActiveCache.length ? repayActiveCache[0].id : null;
   const listEl = document.getElementById('repayList');
 
-  if(active.length===0){
+  if(repayActiveCache.length===0){
     listEl.innerHTML = `<p class="hint" style="margin-top:0;">No active withdrawals to repay.</p>`;
   } else {
-    listEl.innerHTML = active.map(w => `
+    listEl.innerHTML = repayActiveCache.map(w => `
       <button type="button" class="repay-option ${w.id===selectedRepayId?'selected':''}" data-id="${w.id}">
         <span>
           <span class="repay-option-title">${escapeHtml(w.note||'Withdrawal')}</span>
@@ -558,15 +640,17 @@ function openRepaySheet(){
     `).join('');
   }
 
+  repayAmountInput.value = '';
+  updateRepayOwedHint();
+
   const dateInput = document.getElementById('repayDate');
   dateInput.max = todayISO();
   dateInput.value = todayISO();
-  repayConfirmBtn.disabled = active.length===0;
+  repayConfirmBtn.disabled = repayActiveCache.length===0;
   repaySheet.classList.add('open'); repayOverlay.classList.add('open');
 }
 function closeRepaySheet(){ repaySheet.classList.remove('open'); repayOverlay.classList.remove('open'); }
 
-document.getElementById('repayFabBtn').addEventListener('click', openRepaySheet);
 document.getElementById('closeRepaySheet').addEventListener('click', closeRepaySheet);
 repayOverlay.addEventListener('click', closeRepaySheet);
 
@@ -577,18 +661,36 @@ document.getElementById('repayList').addEventListener('click', e=>{
   document.querySelectorAll('#repayList .repay-option').forEach(el=>{
     el.classList.toggle('selected', el.dataset.id===selectedRepayId);
   });
+  updateRepayOwedHint();
+});
+
+document.getElementById('payInFullBtn').addEventListener('click', ()=>{
+  const w = selectedRepayWithdrawal();
+  if(!w) return;
+  repayAmountInput.value = w.total.toFixed(2);
 });
 
 repayConfirmBtn.addEventListener('click', ()=>{
   if(!selectedRepayId) return;
+  const amount = parseFloat(repayAmountInput.value);
+  if(!amount || amount<=0) return;
   const date = document.getElementById('repayDate').value || todayISO();
   const idx = data.withdrawals.findIndex(w=>w.id===selectedRepayId);
   if(idx===-1) return;
-  data.withdrawals[idx].repaid = true;
-  data.withdrawals[idx].repaidDate = date;
+
+  const w = data.withdrawals[idx];
+  w.payments = w.payments || [];
+  w.payments.push({ date, amount });
+
+  const result = enrich(w);
+  if(result.principal <= 0.01 && result.interest <= 0.01){
+    w.repaid = true;
+    w.repaidDate = date;
+  }
+
   save();
   closeRepaySheet();
-  currentTab = 'repaid';
+  currentTab = w.repaid ? 'repaid' : 'active';
   render();
 });
 
@@ -610,7 +712,7 @@ document.getElementById('addForm').addEventListener('submit', e=>{
 
   data.withdrawals.unshift({
     id: uid(), amount, rate, date, type: selectedType,
-    note, repaid:false, repaidDate:null
+    note, repaid:false, repaidDate:null, payments: []
   });
   save();
 
