@@ -384,9 +384,13 @@ function showError(msg){
 function save(){
   if(CONFIGURED){
     if(!currentUser || !db) return;
-    db.collection('ledgers').doc(currentUser.uid).set(data).catch(()=>{
-      showError('Could not save — check your connection.');
-    });
+    // Always write to localStorage immediately so refresh never loses data
+    try{ localStorage.setItem(LOCAL_KEY + '_' + currentUser.uid, JSON.stringify(data)); }catch(e){}
+    db.collection('ledgers').doc(currentUser.uid).set(data)
+      .then(()=>{ showError(null); })
+      .catch(err=>{
+        showError('⚠ Could not sync to cloud: ' + err.message + ' — your data is saved locally.');
+      });
   } else {
     try{ localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); showError(null); }
     catch(e){ showError('Could not save — your browser storage may be full or blocked.'); }
@@ -1040,32 +1044,56 @@ if(CONFIGURED){
   db.enablePersistence().catch(()=>{ /* multiple tabs open, or unsupported browser — fine */ });
 
   auth.onAuthStateChanged(user => {
-    bootTimedOut = true; // a real response arrived, cancel the timeout concern
+    bootTimedOut = true;
     currentUser = user;
     document.getElementById('bootLoading').style.display = 'none';
     if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
 
     if(user){
+      // ── Step 1: load from localStorage immediately so the UI is never blank ──
+      const cacheKey = LOCAL_KEY + '_' + user.uid;
+      try{
+        const raw = localStorage.getItem(cacheKey);
+        if(raw){
+          const c = JSON.parse(raw);
+          data = {
+            withdrawals: Array.isArray(c.withdrawals) ? c.withdrawals : [],
+            currency: c.currency || 'BDT',
+            baseLimit: typeof c.baseLimit === 'number' ? c.baseLimit : DEFAULT_LIMIT
+          };
+        }
+      }catch(e){}
+
       document.getElementById('authScreen').style.display = 'none';
       document.getElementById('appScreen').style.display = 'block';
       document.getElementById('accountEmail').textContent = user.email;
+      currencySelect.value = data.currency;
+      render(); // show cached data instantly
 
+      // ── Step 2: subscribe to Firestore; it may arrive from local cache first ──
       unsubscribeSnapshot = db.collection('ledgers').doc(user.uid).onSnapshot(doc => {
         if(doc.exists){
           const remote = doc.data();
-          data = {
-            withdrawals: remote.withdrawals || [],
+          const remoteData = {
+            withdrawals: Array.isArray(remote.withdrawals) ? remote.withdrawals : [],
             currency: remote.currency || 'BDT',
             baseLimit: typeof remote.baseLimit === 'number' ? remote.baseLimit : DEFAULT_LIMIT
           };
-        } else {
-          data = { withdrawals: [], currency: 'BDT', baseLimit: DEFAULT_LIMIT };
-          db.collection('ledgers').doc(user.uid).set(data).catch(()=>{});
+          // Only update if server data has MORE withdrawals or is different
+          // (prevents blank server snapshot from wiping good local data)
+          const localLen = data.withdrawals.length;
+          const remoteLen = remoteData.withdrawals.length;
+          if(remoteLen >= localLen || localLen === 0){
+            data = remoteData;
+            // Keep localStorage in sync with server
+            try{ localStorage.setItem(cacheKey, JSON.stringify(data)); }catch(e){}
+          }
         }
+        // If doc doesn't exist yet: do nothing — save() will create it on first user action
         currencySelect.value = data.currency;
         render();
       }, err => {
-        showError('Sync error: ' + err.message);
+        showError('Sync error: ' + err.message + ' — showing locally cached data.');
       });
     } else {
       document.getElementById('appScreen').style.display = 'none';
